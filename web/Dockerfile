@@ -1,5 +1,5 @@
 # Next.js frontend (read-only). Prisma client is generated at build; no DB needed to build.
-FROM node:22-slim AS deps
+FROM node:24-slim AS deps
 RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -11,7 +11,7 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build && npm prune --omit=dev
 
-FROM node:22-slim AS run
+FROM node:24-slim AS run
 RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000
