@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: supertrend
+    ports:
+      - "5433:5432"          # 5433 on host to avoid clashing with a local Postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d supertrend"]
+      interval: 3s
+      retries: 20
+
+  scanner:
+    build: ./scanner
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/supertrend
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "main.py", "migrate"]
+
+  web:
+    build: ./web
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/supertrend
+    ports:
+      - "3000:3000"
+    depends_on:
+      scanner:
+        condition: service_completed_successfully   # migrations applied first
+
+volumes:
+  pgdata:

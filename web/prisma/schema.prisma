@@ -1,0 +1,513 @@
+// READ-ONLY MIRROR of the Postgres schema.
+// Migrations are owned by Python/Alembic (scanner/migrations). NEVER run
+// `prisma migrate` or `prisma db push` against this database.
+// After a new Alembic migration: update this file by hand, then check with
+//   npx prisma db pull --print   (diff against this file)
+// Field names are kept snake_case = column names, so no @map noise.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Universe
+// ---------------------------------------------------------------------------
+model Symbol {
+  id                 Int       @id @default(autoincrement())
+  symbol             String    @unique
+  name               String?
+  isin               String?   @unique
+  industry           String?
+  series             String    @default("EQ")
+  shares_outstanding BigInt?
+  is_active          Boolean   @default(true)
+  status             String    @default("listed")
+  listed_date        DateTime? @db.Date
+  delisted_date      DateTime? @db.Date
+  created_at         DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime  @default(now()) @db.Timestamptz(6)
+
+  aliases         SymbolAlias[]
+  index_members   IndexMember[]
+  index_snapshots IndexMemberSnapshot[]
+  exclusions      ExclusionList[]
+  daily_candles   DailyCandle[]
+  weekly_candles  WeeklyCandle[]
+  weekly_st       WeeklySupertrend[]
+  st_state        SupertrendState?
+  scan_results    StockScanResult[]
+  corp_actions    CorporateAction[]
+  dq_logs         DataQualityLog[]
+  bt_trades       BacktestTrade[]
+
+  @@map("symbols")
+}
+
+model SymbolAlias {
+  old_symbol String
+  symbol_id  Int
+  changed_on DateTime @db.Date
+  symbol     Symbol   @relation(fields: [symbol_id], references: [id], onDelete: Cascade)
+
+  @@id([old_symbol, changed_on])
+  @@map("symbol_aliases")
+}
+
+model Index {
+  id         Int      @id @default(autoincrement())
+  name       String   @unique
+  slug       String?  @unique
+  category   String
+  csv_url    String?
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  members   IndexMember[]
+  snapshots IndexMemberSnapshot[]
+
+  @@map("indices")
+}
+
+model IndexMember {
+  index_id  Int
+  symbol_id Int
+  added_on  DateTime? @db.Date
+  index     Index     @relation(fields: [index_id], references: [id], onDelete: Cascade)
+  symbol    Symbol    @relation(fields: [symbol_id], references: [id], onDelete: Cascade)
+
+  @@id([index_id, symbol_id])
+  @@map("index_members")
+}
+
+model IndexMemberSnapshot {
+  index_id      Int
+  snapshot_date DateTime @db.Date
+  symbol_id     Int
+  index         Index    @relation(fields: [index_id], references: [id], onDelete: Cascade)
+  symbol        Symbol   @relation(fields: [symbol_id], references: [id], onDelete: Cascade)
+
+  @@id([index_id, snapshot_date, symbol_id])
+  @@map("index_member_snapshots")
+}
+
+model ExclusionList {
+  as_of_date DateTime @db.Date
+  list_type  String
+  symbol_id  Int
+  stage      String?
+  symbol     Symbol   @relation(fields: [symbol_id], references: [id], onDelete: Cascade)
+
+  @@id([as_of_date, list_type, symbol_id])
+  @@map("exclusion_list")
+}
+
+// ---------------------------------------------------------------------------
+// Price data (charts only; tables read snapshots)
+// ---------------------------------------------------------------------------
+model DailyCandle {
+  symbol_id    Int
+  date         DateTime @db.Date
+  open         Float
+  high         Float
+  low          Float
+  close        Float
+  volume       BigInt?
+  delivery_qty BigInt?
+  delivery_pct Float?   @db.Real
+  source       String   @default("yf")
+  symbol       Symbol   @relation(fields: [symbol_id], references: [id], onDelete: Cascade)
+
+  @@id([symbol_id, date])
+  @@map("daily_candles")
+}
+
+model WeeklyCandle {
+  symbol_id       Int
+  week_end_date   DateTime @db.Date
+  week_start_date DateTime @db.Date
+  open            Float
+  high            Float
+  low             Float
+  close           Float
+  volume          BigInt?
+  trading_days    Int      @db.SmallInt
+  symbol          Symbol   @relation(fields: [symbol_id], references: [id], onDelete: Cascade)
+
+  @@id([symbol_id, week_end_date])
+  @@map("weekly_candles")
+}
+
+model BenchmarkCandle {
+  index_name String
+  date       DateTime @db.Date
+  open       Float?
+  high       Float?
+  low        Float?
+  close      Float
+  volume     BigInt?
+
+  @@id([index_name, date])
+  @@map("benchmark_candles")
+}
+
+// ---------------------------------------------------------------------------
+// Supertrend
+// ---------------------------------------------------------------------------
+model WeeklySupertrend {
+  symbol_id     Int
+  week_end_date DateTime @db.Date
+  atr           Float?
+  upper_band    Float?
+  lower_band    Float?
+  st_value      Float?
+  direction     Int?     @db.SmallInt
+  symbol        Symbol   @relation(fields: [symbol_id], references: [id], onDelete: Cascade)
+
+  @@id([symbol_id, week_end_date])
+  @@map("weekly_supertrend")
+}
+
+model SupertrendState {
+  symbol_id      Int       @id
+  week_end_date  DateTime  @db.Date
+  atr_period     Int       @db.SmallInt
+  multiplier     Float     @db.Real
+  close          Float
+  atr            Float?
+  upper_band     Float?
+  lower_band     Float?
+  st_value       Float?
+  direction      Int?      @db.SmallInt
+  flip_date      DateTime? @db.Date
+  flip_price     Float?
+  weeks_in_trend Int?
+  updated_at     DateTime  @default(now()) @db.Timestamptz(6)
+  symbol         Symbol    @relation(fields: [symbol_id], references: [id], onDelete: Cascade)
+
+  @@map("supertrend_state")
+}
+
+model SectorIndexWeekly {
+  industry      String
+  week_end_date DateTime @db.Date
+  index_value   Float
+  bench_value   Float?
+  rs_ratio_raw  Float?
+  rs_ratio      Float?
+  rs_momentum   Float?
+  st_breadth    Float?
+
+  @@id([industry, week_end_date])
+  @@map("sector_index_weekly")
+}
+
+// ---------------------------------------------------------------------------
+// Weekly scan snapshots
+// ---------------------------------------------------------------------------
+model ScanRun {
+  id              Int       @id @default(autoincrement())
+  week_end_date   DateTime  @unique @db.Date
+  status          String    @default("running")
+  started_at      DateTime  @default(now()) @db.Timestamptz(6)
+  finished_at     DateTime? @db.Timestamptz(6)
+  duration_ms     Int?
+  stocks_scanned  Int?
+  qualified_count Int?
+  notes           String?
+  error           String?
+  config          Json?
+  timings         Json?
+
+  stocks  StockScanResult[]
+  sectors SectorScanResult[]
+  regime  MarketRegime?
+
+  @@map("scan_runs")
+}
+
+model StockScanResult {
+  run_id        Int
+  symbol_id     Int
+  week_end_date DateTime @db.Date
+  symbol        String
+  name          String?
+  industry      String?
+  index_list    String?
+  history_days  Int?
+
+  price          Float?
+  direction      String?
+  weeks_in_trend Int?
+  flip_date      DateTime? @db.Date
+  flip_price     Float?
+  pct_since_flip Float?
+  is_new_flip    Boolean?
+  st_value       Float?
+  pct_from_st    Float?
+
+  high_52w         Float?
+  low_52w          Float?
+  pct_from_high    Float?
+  pct_above_low    Float?
+  sma50            Float?
+  sma100           Float?
+  sma150           Float?
+  sma200           Float?
+  sma200_slope_pct Float?
+  sma200_rising    Boolean?
+
+  ret_1w  Float?
+  ret_1m  Float?
+  ret_3m  Float?
+  ret_6m  Float?
+  ret_9m  Float?
+  ret_12m Float?
+
+  avg_vol_20d         Float?
+  avg_turnover_20d_cr Float?
+  vol_ratio           Float?
+  flip_vol_ratio      Float?
+  atr_pct             Float?
+  tightness_ratio     Float?
+  delivery_pct_20d    Float?
+  delivery_pct_latest Float?
+  market_cap_cr       Float?
+
+  rs_raw          Float?
+  rs_rating       Int?   @db.SmallInt
+  rs_vs_benchmark Float?
+  rs_vs_sector    Float?
+
+  sector_score     Float?
+  sector_rank      Int?     @db.SmallInt
+  sector_tradeable Boolean?
+  in_asm_gsm       Boolean?
+
+  f_supertrend     Boolean?
+  f_sector         Boolean?
+  f_trend_template Boolean?
+  f_52w_range      Boolean?
+  f_rs             Boolean?
+  f_liquidity      Boolean?
+  f_price          Boolean?
+  f_not_asm        Boolean?
+  qualified        Boolean  @default(false)
+
+  sig_fresh_flip    Boolean?
+  sig_tight_stop    Boolean?
+  sig_vol_confirm   Boolean?
+  sig_vcp           Boolean?
+  sig_accumulation  Boolean?
+  sig_near_high     Boolean?
+  sig_sector_leader Boolean?
+  pen_overextended  Boolean?
+  pen_high_atr      Boolean?
+  pen_late_stage    Boolean?
+
+  score_rs        Float?
+  score_sector    Float?
+  score_freshness Float?
+  score_near_high Float?
+  score_volume    Float?
+  score_tightness Float?
+  score_risk      Float?
+  penalty         Float?
+  stock_score     Float?
+  grade           String?
+  reasons         String?
+
+  stop_price     Float?
+  risk_pct       Float?
+  position_qty   Int?
+  position_value Float?
+
+  run       ScanRun @relation(fields: [run_id], references: [id], onDelete: Cascade)
+  symbolRef Symbol  @relation(fields: [symbol_id], references: [id], onDelete: Cascade)
+
+  @@id([run_id, symbol_id])
+  @@index([run_id, industry])
+  @@index([run_id, direction])
+  @@index([run_id, stock_score(sort: Desc)])
+  @@index([symbol_id, run_id])
+  @@map("stock_scan_results")
+}
+
+model SectorScanResult {
+  run_id            Int
+  industry          String
+  week_end_date     DateTime @db.Date
+  stock_count       Int
+  bullish_count     Int?
+  ret_1w            Float?
+  ret_4w            Float?
+  ret_13w           Float?
+  ret_26w           Float?
+  ret_52w           Float?
+  rs_ratio_raw      Float?
+  rs_trend          Float?
+  rs_ratio          Float?
+  rs_momentum       Float?
+  rrg_quadrant      String?
+  st_breadth        Float?
+  pct_above_sma50   Float?
+  pct_above_sma200  Float?
+  pct_near_high     Float?
+  breadth_change_4w Float?
+  vol_26w           Float?
+  risk_adj_return   Float?
+  rank_ret_13w      Float?
+  rank_rs_trend     Float?
+  rank_st_breadth   Float?
+  rank_risk_adj     Float?
+  sector_score      Float?
+  sector_rank       Int?     @db.SmallInt
+  tradeable         Boolean  @default(false)
+  run               ScanRun  @relation(fields: [run_id], references: [id], onDelete: Cascade)
+
+  @@id([run_id, industry])
+  @@index([run_id, sector_rank])
+  @@index([industry, run_id])
+  @@map("sector_scan_results")
+}
+
+model MarketRegime {
+  run_id             Int      @id
+  week_end_date      DateTime @db.Date
+  nifty500_close     Float?
+  nifty500_sma200    Float?
+  sma200_rising      Boolean?
+  above_200dma       Boolean?
+  nifty50_close      Float?
+  market_breadth_pct Float?
+  pct_above_sma200   Float?
+  regime             String
+  run                ScanRun  @relation(fields: [run_id], references: [id], onDelete: Cascade)
+
+  @@map("market_regime")
+}
+
+// ---------------------------------------------------------------------------
+// Ops / data quality
+// ---------------------------------------------------------------------------
+model IngestLog {
+  source     String
+  trade_date DateTime @db.Date
+  status     String
+  rows       Int?
+  message    String?
+  fetched_at DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([source, trade_date])
+  @@map("ingest_log")
+}
+
+model CorporateAction {
+  id          Int      @id @default(autoincrement())
+  symbol_id   Int
+  ex_date     DateTime @db.Date
+  action_type String
+  ratio       Float?
+  detected_at DateTime @default(now()) @db.Timestamptz(6)
+  resolved    Boolean  @default(false)
+  symbol      Symbol   @relation(fields: [symbol_id], references: [id], onDelete: Cascade)
+
+  @@unique([symbol_id, ex_date])
+  @@map("corporate_actions")
+}
+
+model DataQualityLog {
+  id         BigInt    @id @default(autoincrement())
+  symbol_id  Int?
+  date       DateTime? @db.Date
+  source     String?
+  issue      String
+  details    Json?
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  symbol     Symbol?   @relation(fields: [symbol_id], references: [id], onDelete: Cascade)
+
+  @@map("data_quality_log")
+}
+
+// ---------------------------------------------------------------------------
+// Backtests (migration 0002)
+// ---------------------------------------------------------------------------
+model BacktestSweep {
+  id          Int           @id @default(autoincrement())
+  created_at  DateTime      @default(now()) @db.Timestamptz(6)
+  name        String?
+  grid        Json?
+  duration_ms Int?
+  notes       String?
+  runs        BacktestRun[]
+
+  @@map("backtest_sweeps")
+}
+
+model BacktestRun {
+  id                Int              @id @default(autoincrement())
+  sweep_id          Int?
+  created_at        DateTime         @default(now()) @db.Timestamptz(6)
+  name              String
+  params            Json
+  start_date        DateTime         @db.Date
+  end_date          DateTime         @db.Date
+  survivorship_bias Boolean
+  metrics           Json
+  benchmark_metrics Json
+  cagr              Float?
+  max_drawdown      Float?
+  sharpe            Float?
+  profit_factor     Float?
+  win_rate          Float?
+  trades            Int?
+  sweep             BacktestSweep?   @relation(fields: [sweep_id], references: [id], onDelete: Cascade)
+  equity            BacktestEquity[]
+  tradeRows         BacktestTrade[]
+
+  @@index([sweep_id, cagr(sort: Desc)])
+  @@map("backtest_runs")
+}
+
+model BacktestEquity {
+  backtest_id  Int
+  date         DateTime    @db.Date
+  equity       Float
+  benchmark    Float?
+  invested_pct Float?
+  drawdown     Float?
+  positions    Int?
+  nav          Float?
+  contributed  Float?
+  run          BacktestRun @relation(fields: [backtest_id], references: [id], onDelete: Cascade)
+
+  @@id([backtest_id, date])
+  @@map("backtest_equity")
+}
+
+model BacktestTrade {
+  id          BigInt      @id @default(autoincrement())
+  backtest_id Int
+  symbol_id   Int
+  symbol      String
+  industry    String?
+  signal_date DateTime    @db.Date
+  entry_date  DateTime    @db.Date
+  entry_price Float
+  exit_date   DateTime?   @db.Date
+  exit_price  Float?
+  qty         Int
+  pnl         Float?
+  pnl_pct     Float?
+  weeks_held  Int?
+  exit_reason String?
+  entry_score Float?
+  run         BacktestRun @relation(fields: [backtest_id], references: [id], onDelete: Cascade)
+  symbolRef   Symbol      @relation(fields: [symbol_id], references: [id], onDelete: Cascade)
+
+  @@index([backtest_id, entry_date])
+  @@map("backtest_trades")
+}

@@ -1,0 +1,251 @@
+# Survivorship-free backtest (2026-10-05). Point-in-time universe rebuilt from the NSE bhavcopy archive:
+# top 750 by traded value, re-picked every March / September, delisted stocks included.
+#   createdb supertrend_pit
+#   export SCANNER_CONFIG=config_pit.yaml DATABASE_URL=postgresql://localhost:5432/supertrend_pit
+#   python main.py migrate && python main.py pit-build && python main.py supertrend --full && python main.py backtest
+# Everything else matches config.yaml.
+# Scanner configuration. All tunable parameters live here; env/secrets live in .env.
+# Later steps add: indicators, sectors, regime, filters, scoring, backtest sections.
+
+universe:
+  base_url: https://niftyindices.com/IndexConstituent/
+  universe_index: PIT Top 750       # EXPERIMENT: point-in-time top 750 by traded value (pit-build)
+  point_in_time: true
+  exclude_symbol_regex: "^DUMMY"     # NSE placeholder tickers during demergers
+  indices:
+    # broad
+    - {name: PIT Top 750,            file: none,                             category: broad}
+    - {name: Nifty 50,               file: ind_nifty50list.csv,              category: broad}
+    - {name: Nifty Next 50,          file: ind_niftynext50list.csv,          category: broad}
+    - {name: Nifty 100,              file: ind_nifty100list.csv,             category: broad}
+    - {name: Nifty 200,              file: ind_nifty200list.csv,             category: broad}
+    - {name: Nifty 500,              file: ind_nifty500list.csv,             category: broad}
+    - {name: Nifty Total Market,     file: ind_niftytotalmarket_list.csv,    category: broad}
+    - {name: Nifty Midcap 150,       file: ind_niftymidcap150list.csv,       category: broad}
+    - {name: Nifty Smallcap 250,     file: ind_niftysmallcap250list.csv,     category: broad}
+    - {name: Nifty Microcap 250,     file: ind_niftymicrocap250_list.csv,    category: broad}
+    # sectoral
+    - {name: Nifty Bank,             file: ind_niftybanklist.csv,            category: sectoral}
+    - {name: Nifty Private Bank,     file: ind_nifty_privatebanklist.csv,    category: sectoral}
+    - {name: Nifty PSU Bank,         file: ind_niftypsubanklist.csv,         category: sectoral}
+    - {name: Nifty Financial Services, file: ind_niftyfinancelist.csv,       category: sectoral}
+    - {name: Nifty IT,               file: ind_niftyitlist.csv,              category: sectoral}
+    - {name: Nifty Pharma,           file: ind_niftypharmalist.csv,          category: sectoral}
+    - {name: Nifty Healthcare,       file: ind_niftyhealthcarelist.csv,      category: sectoral}
+    - {name: Nifty Auto,             file: ind_niftyautolist.csv,            category: sectoral}
+    - {name: Nifty FMCG,             file: ind_niftyfmcglist.csv,            category: sectoral}
+    - {name: Nifty Metal,            file: ind_niftymetallist.csv,           category: sectoral}
+    - {name: Nifty Realty,           file: ind_niftyrealtylist.csv,          category: sectoral}
+    - {name: Nifty Energy,           file: ind_niftyenergylist.csv,          category: sectoral}
+    - {name: Nifty Media,            file: ind_niftymedialist.csv,           category: sectoral}
+    - {name: Nifty Consumer Durables, file: ind_niftyconsumerdurableslist.csv, category: sectoral}
+    - {name: Nifty Oil & Gas,        file: ind_niftyoilgaslist.csv,          category: sectoral}
+    # thematic
+    - {name: Nifty India Defence,    file: ind_niftyindiadefence_list.csv,   category: thematic}
+    - {name: Nifty CPSE,             file: ind_niftycpselist.csv,            category: thematic}
+    - {name: Nifty PSE,              file: ind_niftypselist.csv,             category: thematic}
+    - {name: Nifty Infrastructure,   file: ind_niftyinfralist.csv,           category: thematic}
+    - {name: Nifty India Consumption, file: ind_niftyconsumptionlist.csv,    category: thematic}
+    - {name: Nifty Commodities,      file: ind_niftycommoditieslist.csv,     category: thematic}
+
+data:
+  backfill_years: 3
+  yf_batch_size: 100
+  yf_auto_adjust: true        # false = split-adjusted only (matches TradingView default charts)
+  yf_pause_s: 1.0             # pause between yfinance batches
+  shares_workers: 8           # threads for fast_info share-count lookups
+  http_retries: 4
+  http_timeout_s: 30
+  nse_min_interval_s: 1.0     # throttle between NSE / niftyindices requests
+  candle_ready_ist: "16:00"   # today's daily candle is ignored before this time
+  calendar_benchmark: NIFTY50 # trading calendar for gap detection (Yahoo stock data has
+                              # phantom holiday rows and outage days; the index series does not)
+  gap_calendar_min_frac: 0.5  # fallback calendar: a date is a session if >= 50% of symbols traded
+  ohlc_tolerance: 0.005       # high/low inconsistency > 0.5% is logged (always clamped)
+  benchmarks:                 # benchmark_candles.index_name -> yfinance ticker
+    NIFTY500: ^CRSLDX
+    NIFTY50: ^NSEI
+
+daily:
+  series: [EQ, BE, BZ]        # bhavcopy series accepted, in order of preference
+  corp_action_threshold: 0.03 # |stored close(D-1) / NSE PREV_CLOSE(D) - 1| above this = split/bonus
+  max_catchup_days: 10        # daily job back-fills at most this many missed days
+  wait_minutes: 60            # poll for today's bhavcopy this long (published ~18:00-19:00 IST)
+  poll_minutes: 10
+  min_coverage: 0.9           # weekly scan refuses to run if a session has < 90% of symbols
+
+weekly:
+  rebuild_weeks: 3            # incremental run re-derives the last N weeks from daily data
+                              # (catches late corrections); older changes need --full or since=
+
+supertrend:
+  # (7, 3) since 2026-09-30: beat (10, 3) and (10, 2) across the 12-year sweep, in-sample and
+  # out-of-sample (README "12-year sweep #4"). Previous value: atr_period 10.
+  atr_period: 7
+  multiplier: 3.0
+
+# ---------------------------------------------------------------------------
+# Weekly scan (step 4). Percent values are in percent units (10 = 10%).
+# ---------------------------------------------------------------------------
+indicators:
+  ffill_limit_days: 5         # bridge short data gaps (Yahoo outage days) in daily panels
+  stale_weeks: 2              # stock without a weekly candle for this long is left out of the scan
+  near_high_breadth_pct: 10   # sector breadth "new highs": within 10% of 52W high
+  delivery_short_days: 5      # recent delivery % window compared against the 20d average
+  index_list_exclude: [Nifty Total Market]   # every stock is in the universe index; omit it from `Index`
+
+relative_strength:
+  benchmark: NIFTY500
+  weights: {ret_3m: 0.4, ret_6m: 0.2, ret_9m: 0.2, ret_12m: 0.2}
+  sma_weeks: 10               # RS vs benchmark = ratio / SMA10w(ratio)
+
+sectors:
+  weights: {ret_13w: 0.30, rs_trend: 0.30, st_breadth: 0.20, risk_adj: 0.20}
+  rs_sma_weeks: 10
+  rrg_window: 10              # JdK-style normalisation window (weeks)
+  rrg_smooth: 3               # EMA span (weeks) applied before each z-score; 1 = no smoothing
+  breadth_change_weeks: 4
+  tradeable:
+    max_rank: 5
+    min_st_breadth: 60
+    min_rs_trend: 1.0
+    quadrants: [Leading, Improving]
+    min_stocks: 3
+
+regime:
+  benchmark: NIFTY500
+  sma_days: 200
+  slope_days: 20
+  min_breadth: 50             # % of universe weekly-ST bullish that confirms a bull regime
+  bear_size_factor: 0.5       # position size multiplier in a bear regime
+
+filters:                      # hard filters -> Qualified
+  min_rs_rating: 70
+  min_above_low_pct: 30
+  max_from_high_pct: 25
+  min_turnover_cr: 10
+  min_price: 50
+  sma200_rising_days: 20      # SMA200 must be above its value this many sessions ago
+
+signals:                      # soft signals
+  fresh_flip_max_weeks: 6
+  tight_stop_pct: 10
+  vol_confirm_ratio: 1.5
+  vcp_max_tightness: 0.75     # avg range of last 3 weeks / avg range of the 3 before
+  near_high_pct: 5
+
+penalties:
+  overextended_sma50_pct: 25
+  overextended_since_flip_pct: 40
+  high_atr_percentile: 90
+  late_stage_weeks: 20
+  # 0 since 2026-09-30: flags still show in "reasons", but no longer lower the score. Extended and
+  # long-running trends kept outperforming (factor IC + 12y sweep). Previous: {10, 5, 10}.
+  points: {overextended: 0, high_atr: 0, late_stage: 0}
+
+scoring:
+  # momentum weights since 2026-09-30 (RS and nearness to the 52-week high carried the signal;
+  # freshness and stop distance had none). Previous:
+  # {rs: 0.25, sector: 0.15, freshness: 0.15, near_high: 0.15, volume: 0.10, tightness: 0.10, risk: 0.10}
+  weights: {rs: 0.35, near_high: 0.35, volume: 0.10, tightness: 0.10, sector: 0.10}
+  freshness_decay_per_week: 6   # score 100 for weeks 1..fresh_flip_max_weeks, then -6/week
+  volume_ratio_floor: 0.8       # volume score 0 at <= 0.8x, 100 at >= 2x
+  volume_ratio_full: 2.0
+  tightness_best: 0.5           # contraction score 100 at ratio <= 0.5, 0 at >= 1.25
+  tightness_worst: 1.25
+  risk_full_pct: 3              # risk score 100 at <= 3% from stop, 0 at >= 15%
+  risk_zero_pct: 15
+  grades: {"A+": 80, "A": 70, "B": 60}
+
+trade_plan:
+  max_position_pct: 25          # cap one position at this % of capital
+
+# ---------------------------------------------------------------------------
+# Backtest (step 8). Signal at Friday close, fill at the next week's open.
+# ---------------------------------------------------------------------------
+backtest:
+  capital: 1000000
+  # defaults = "Rule 1" (README): buy in the week the Supertrend flips bullish when the score is >= 70,
+  # any sector, hold until the Supertrend turns bearish. Since 2026-10-01 each buy is 10% of equity
+  # from the account's own cash (no position limit, no new capital; a signal cash cannot cover is
+  # skipped or bought smaller). Exit on a bearish Supertrend or a score below 30 (since 2026-10-02).
+  # Nifty 500 before 2026-10-02: 28.7% CAGR, -22.4% max DD (no score exit).
+  # Previous: 10 equal positions (28.8%, -22.5%); briefly weeks 1-3 + Rs 1 lakh each + add capital.
+  # Previous default (v2): top_n_sectors 5, min_rs 80, sector_exit true, min_score 0,
+  # entry_max_weeks_in_trend 0, entry_filters all -> 27.0% CAGR, -28.2% max DD.
+  max_positions: 0            # K: hold at most this many stocks (0 = no limit; cash is the limit). Previous: 10
+  top_n_sectors: 0            # buy only from the top-N sectors that pass the tradeable tests (0 = any sector)
+  min_rs: 0
+  sizing: fixed               # equal (equity / K) | risk (risk_pct of equity to the ST stop) | fixed. Previous: equal
+  position_size: 0            # (fixed) minimum rupees per stock
+  position_pct: 10            # (fixed) size = max(position_size, this % of equity); 0 = off
+  add_capital: false          # true = add the shortfall (up to position_size) as new capital when cash runs short
+  min_fill_pct: 50            # (fixed) skip a buy when cash covers less than half its size (no scrap positions)
+  risk_pct: 1.0
+  max_position_pct: 20        # cap per position (% of equity)
+  cost_round_trip_pct: 0.2    # brokerage + taxes, split evenly between entry and exit
+  slippage_pct: 0.05          # per side
+  sector_exit: false          # false = exit only when the weekly Supertrend turns bearish
+  sector_exit_weeks: 2        # (sector_exit: true) exit when the sector is outside the top N this many weeks in a row
+  bear_mode: ignore           # ignore | half (half-size entries) | skip (no new entries)
+  min_score: 70               # enter only when the rank score is at least this
+  score_weights: null         # null = scanner stock_score; or re-weight its parts, e.g. {rs: 0.4, near_high: 0.4, volume: 0.2}
+  score_penalties: true       # subtract the scanner penalties from a re-weighted score
+  stop_pct: 0                 # protective stop this % below entry, hit intra-week on the weekly low (0 = off)
+  trail_pct: 0                # ratchet that stop to this % below the highest weekly close (0 = off)
+  trail_ma_weeks: 0           # exit on a weekly close below this SMA of weekly closes (0 = off)
+  time_stop_weeks: 0          # exit after N weeks if the gain is still <= time_stop_min_pct (0 = off)
+  time_stop_min_pct: 0
+  entry_max_weeks_in_trend: 1 # 1 = enter only on the week the Supertrend flips bullish (0 = any bullish week)
+  entry_filters: tradeable    # all = every hard filter | tradeable = liquidity, price, not ASM only
+  above_sma200: false         # enter only when the price is above its 200-day SMA
+  entry_ma: none              # none | template (price > SMA50 > SMA150 > SMA200, SMA200 rising) | stack | above50 | rising200
+  max_per_sector: 0           # hold at most this many stocks of one industry (0 = no cap)
+  exit_score_below: 30        # also exit when the stock score falls below this (0 = off). Since 2026-10-02; previous 0
+  take_profit: []             # e.g. [[50, 0.4], [100, 0.4]]: sell 40% at +50%, then 40% of the rest at +100%
+  tp_fill: intraweek          # intraweek (limit order at the target) | close (weekly close, sold next open)
+  trim_above_pct: 0           # sell a winner back to trim_to_pct of equity once it grows above this (0 = off)
+  trim_to_pct: 10
+  swap_min_score: 0           # out of cash: a signal scoring >= this replaces the weakest holding (0 = off)...
+  swap_below_score: 60        # ...if that holding's current score is below this
+  shuffle_seed: 0             # Monte Carlo only (`main.py monte-carlo`): random signal order; 0 = best score first
+  skip_pct: 0                 # Monte Carlo only: miss this % of signals at random
+  tax: current                # none | current (STCG 20%, LTCG 12.5% > Rs 1.25 L) | historical; paid each April from cash. Since 2026-10-06; previous none
+  tax_cess_pct: 4
+  warmup_min_sma200_pct: 80   # start once this % of stocks have a 200-day history
+  start: "2015-07-31"          # same first week as the live backtest (#3103) for a like-for-like comparison
+  end: null
+  sweep:
+    # signal-level axes: each (supertrend, sector_weights) pair rebuilds the scanner signals
+    supertrend: [[7, 3]]          # (7, 3) everywhere since 2026-10-02. Previous: [[10, 3], [7, 3], [10, 2]]
+    sector_weights:
+      default: {ret_13w: 0.30, rs_trend: 0.30, st_breadth: 0.20, risk_adj: 0.20}
+    # simulation axes: any backtest key -> list of values (cartesian product)
+    grid:
+      top_n_sectors: [3, 5, 0]      # 0 = no sector gate
+      min_rs: [70, 80]
+      min_score: [0, 70]
+      max_positions: [5, 10]
+    # named override sets; one choice per axis, product across axes
+    variants:
+      exit:
+        st:        {sector_exit: false}
+        st+sector: {sector_exit: true}
+        stop10:    {sector_exit: true, stop_pct: 10}
+        trail20:   {sector_exit: true, stop_pct: 15, trail_pct: 20}
+        ma10:      {sector_exit: false, trail_ma_weeks: 10}
+      rank:
+        scanner: {}           # = scoring.weights (momentum since 2026-09-30)
+        legacy:  {score_weights: {rs: 0.25, sector: 0.15, freshness: 0.15, near_high: 0.15, volume: 0.10,
+                                  tightness: 0.10, risk: 0.10}}
+      regime:
+        half:   {bear_mode: half}
+        ignore: {bear_mode: ignore}
+  walk_forward:
+    enabled: true
+    train_years: 4            # pick parameters on this look-back...
+    test_years: 1             # ...trade them unseen for this long, then roll forward
+    anchored: false           # true = training always starts at the beginning
+    metric: cagr              # cagr | sharpe | mar (CAGR / |max DD|); 12y test: mar picked defensive sets that lagged
+    top_k: 10                 # blend the k best parameter sets instead of trusting the single best
+    min_trades_per_year: 4

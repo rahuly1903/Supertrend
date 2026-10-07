@@ -1,0 +1,13 @@
+pandas>=2.2,<3
+numpy>=1.26,<3
+numba>=0.60
+psycopg[binary,pool]>=3.2
+SQLAlchemy>=2.0          # only used by Alembic
+alembic>=1.13
+pydantic>=2.7
+pydantic-settings>=2.3
+PyYAML>=6.0
+requests>=2.32
+tenacity>=8.5
+yfinance>=0.2.54
+pytest>=8.2

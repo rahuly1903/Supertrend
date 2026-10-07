@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg: #f7f8fa;
+  --panel: #ffffff;
+  --panel-2: #f1f3f6;
+  --line: #e2e5ea;
+  --text: #16181d;
+  --muted: #667085;
+  --up: #0f9d58;
+  --down: #d93025;
+  --warn: #b7791f;
+  --accent: #2563eb;
+  --up-bg: rgba(15, 157, 88, 0.12);
+  --down-bg: rgba(217, 48, 37, 0.12);
+  --warn-bg: rgba(183, 121, 31, 0.14);
+  --accent-bg: rgba(37, 99, 235, 0.12);
+}
+
+.dark {
+  --bg: #0b0e13;
+  --panel: #12161d;
+  --panel-2: #181d26;
+  --line: #242a35;
+  --text: #e6e8ec;
+  --muted: #8b93a3;
+  --up: #22c55e;
+  --down: #f05252;
+  --warn: #f5b942;
+  --accent: #5b8def;
+  --up-bg: rgba(34, 197, 94, 0.14);
+  --down-bg: rgba(240, 82, 82, 0.14);
+  --warn-bg: rgba(245, 185, 66, 0.14);
+  --accent-bg: rgba(91, 141, 239, 0.16);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-up: var(--up);
+  --color-down: var(--down);
+  --color-warn: var(--warn);
+  --color-accent: var(--accent);
+  --color-up-bg: var(--up-bg);
+  --color-down-bg: var(--down-bg);
+  --color-warn-bg: var(--warn-bg);
+  --color-accent-bg: var(--accent-bg);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html { color-scheme: light; }
+html.dark { color-scheme: dark; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.input {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+.input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+.btn {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.btn:hover { background: var(--panel-2); }
+.btn-active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
