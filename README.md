@@ -439,18 +439,23 @@ One Postgres plus three **cron services** built from the same `scanner/Dockerfil
 runs `migrate`, then its job, and exits. Railway cron schedules are **UTC**, and a run is
 skipped if the previous one is still going.
 
-| Service | Config file (absolute path) | Schedule (UTC) | IST | Command |
-|---|---|---|---|---|
-| scanner-daily | `/scanner/railway/daily.json` | `15 13 * * 1-5` | Mon–Fri 18:45 | `python main.py daily` |
-| scanner-weekly | `/scanner/railway/weekly.json` | `30 2 * * 6` | Sat 08:00 | `python main.py weekly --ingest` |
-| scanner-monthly | `/scanner/railway/monthly.json` | `30 1 1 * *` | 1st, 07:00 | `python main.py universe` |
+Railway's config-as-code (`railway.json`) is deprecated, so every setting is entered in the
+dashboard under each service's **Settings**.
+
+| Service | Cron Schedule (UTC) | IST | Custom Start Command |
+|---|---|---|---|
+| scanner-daily | `15 13 * * 1-5` | Mon–Fri 18:45 | `sh -c 'python main.py migrate && python main.py daily'` |
+| scanner-weekly | `30 2 * * 6` | Sat 08:00 | `sh -c 'python main.py migrate && python main.py weekly --ingest'` |
+| scanner-monthly | `30 1 1 * *` | 1st, 07:00 | `sh -c 'python main.py migrate && python main.py universe'` |
 
 Setup:
 1. Create a project, then add **PostgreSQL**.
 2. For each of the three services:
-   - **New Service → GitHub repo**.
-   - **Settings → Root Directory** = `/scanner`.
-   - **Config-as-code file** = the absolute path from the table above (Railway does not resolve it relative to the root directory).
+   - **New Service → GitHub repo**, then rename the service.
+   - **Root Directory** = `/scanner`. Railway finds `scanner/Dockerfile` there and builds with Docker.
+   - **Custom Start Command** and **Cron Schedule** from the table above.
+   - **Restart Policy** = Never.
+   - Optional: **Watch Paths** = `/scanner/**`, so changes to `web/` don't rebuild the scanner.
 3. Service variables: `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `CAPITAL`, `RISK_PER_TRADE_PCT`, and optionally `TELEGRAM_*`.
 4. One-off initial load: from a local shell with `DATABASE_URL` pointed at Railway's public Postgres URL, run the "First-time load" commands above.
 
@@ -501,9 +506,12 @@ Example: `/api/scanner?preset=best&sort=rs_rating&desc=1` or `/api/export.csv?we
 
 ### Deploying the web service on Railway
 
-Add a fourth service from the same repo:
-- Root Directory `/web`;
-- config file `/web/railway.json` (Dockerfile build, health check `GET /api/runs`);
+Add a fourth service from the same repo, with these dashboard settings:
+- **Root Directory** = `/web` (built from `web/Dockerfile`);
+- no start command or cron schedule;
+- **Healthcheck Path** = `/api/runs`;
+- **Restart Policy** = On Failure;
+- optional: **Watch Paths** = `/web/**`;
 - variable `DATABASE_URL=${{Postgres.DATABASE_URL}}`.
 
 Railway sets `PORT`, and `npm start` honours it.
